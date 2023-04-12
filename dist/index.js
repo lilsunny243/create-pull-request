@@ -58564,6 +58564,98 @@ exports.lookupCompiler = lookupCompiler;
 
 /***/ }),
 
+/***/ 1689:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+const pa = __nccwpck_require__(1017);
+const fs = __nccwpck_require__(7147);
+
+class DefaultFileSystem {
+
+	resolve(path) {
+		return pa.resolve(path);
+	}
+
+	isSeparator(char) {
+		return char === '/' || char === pa.sep;
+	}
+
+	isAbsolute(path) {
+		return pa.isAbsolute(path);
+	}
+
+	join(...paths) {
+		return pa.join(...paths);
+	}
+
+	basename(path) {
+		return pa.basename(path);
+	}
+
+	dirname(path) {
+		return pa.dirname(path);
+	}
+
+	statSync(path, options) {
+		return fs.statSync(path, options);
+	}
+
+	readFileSync(path, options) {
+		return fs.readFileSync(path, options);
+	}
+
+}
+
+class VMFileSystem {
+
+	constructor({fs: fsModule = fs, path: pathModule = pa} = {}) {
+		this.fs = fsModule;
+		this.path = pathModule;
+	}
+
+	resolve(path) {
+		return this.path.resolve(path);
+	}
+
+	isSeparator(char) {
+		return char === '/' || char === this.path.sep;
+	}
+
+	isAbsolute(path) {
+		return this.path.isAbsolute(path);
+	}
+
+	join(...paths) {
+		return this.path.join(...paths);
+	}
+
+	basename(path) {
+		return this.path.basename(path);
+	}
+
+	dirname(path) {
+		return this.path.dirname(path);
+	}
+
+	statSync(path, options) {
+		return this.fs.statSync(path, options);
+	}
+
+	readFileSync(path, options) {
+		return this.fs.readFileSync(path, options);
+	}
+
+}
+
+exports.DefaultFileSystem = DefaultFileSystem;
+exports.VMFileSystem = VMFileSystem;
+
+
+/***/ }),
+
 /***/ 4357:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -58582,11 +58674,15 @@ const {
 const {
 	NodeVM
 } = __nccwpck_require__(6461);
+const {
+	VMFileSystem
+} = __nccwpck_require__(1689);
 
 exports.VMError = VMError;
 exports.VMScript = VMScript;
 exports.NodeVM = NodeVM;
 exports.VM = VM;
+exports.VMFileSystem = VMFileSystem;
 
 
 /***/ }),
@@ -59112,7 +59208,6 @@ exports.NodeVM = NodeVM;
 // Translate the old options to the new Resolver functionality.
 
 const fs = __nccwpck_require__(7147);
-const pa = __nccwpck_require__(1017);
 const nmod = __nccwpck_require__(2503);
 const {EventEmitter} = __nccwpck_require__(2361);
 const util = __nccwpck_require__(3837);
@@ -59124,6 +59219,7 @@ const {
 const {VMScript} = __nccwpck_require__(8611);
 const {VM} = __nccwpck_require__(3841);
 const {VMError} = __nccwpck_require__(2989);
+const {DefaultFileSystem} = __nccwpck_require__(1689);
 
 /**
  * Require wrapper to be able to annotate require with webpackIgnore.
@@ -59155,8 +59251,8 @@ function makeExternalMatcher(obj) {
 
 class LegacyResolver extends DefaultResolver {
 
-	constructor(builtinModules, checkPath, globalPaths, pathContext, customResolver, hostRequire, compiler, strict, externals, allowTransitive) {
-		super(builtinModules, checkPath, globalPaths, pathContext, customResolver, hostRequire, compiler, strict);
+	constructor(fileSystem, builtinModules, checkPath, globalPaths, pathContext, customResolver, hostRequire, compiler, strict, externals, allowTransitive) {
+		super(fileSystem, builtinModules, checkPath, globalPaths, pathContext, customResolver, hostRequire, compiler, strict);
 		this.externals = externals;
 		this.currMod = undefined;
 		this.trustedMods = new WeakMap();
@@ -59373,7 +59469,9 @@ function defaultCustomResolver() {
 	return undefined;
 }
 
-const DENY_RESOLVER = new Resolver({__proto__: null}, [], id => {
+const DEFAULT_FS = new DefaultFileSystem();
+
+const DENY_RESOLVER = new Resolver(DEFAULT_FS, {__proto__: null}, [], id => {
 	throw new VMError(`Access denied to require '${id}'`, 'EDENIED');
 });
 
@@ -59381,7 +59479,7 @@ function resolverFromOptions(vm, options, override, compiler) {
 	if (!options) {
 		if (!override) return DENY_RESOLVER;
 		const builtins = genBuiltinsFromOptions(vm, undefined, undefined, override);
-		return new Resolver(builtins, [], defaultRequire);
+		return new Resolver(DEFAULT_FS, builtins, [], defaultRequire);
 	}
 
 	const {
@@ -59393,22 +59491,22 @@ function resolverFromOptions(vm, options, override, compiler) {
 		customRequire: hostRequire = defaultRequire,
 		context = 'host',
 		strict = true,
+		fs: fsOpt = DEFAULT_FS,
 	} = options;
 
 	const builtins = genBuiltinsFromOptions(vm, builtinOpt, mockOpt, override);
 
-	if (!externalOpt) return new Resolver(builtins, [], hostRequire);
+	if (!externalOpt) return new Resolver(fsOpt, builtins, [], hostRequire);
 
 	let checkPath;
 	if (rootPaths) {
-		const checkedRootPaths = (Array.isArray(rootPaths) ? rootPaths : [rootPaths]).map(f => pa.resolve(f));
+		const checkedRootPaths = (Array.isArray(rootPaths) ? rootPaths : [rootPaths]).map(f => fsOpt.resolve(f));
 		checkPath = (filename) => {
 			return checkedRootPaths.some(path => {
 				if (!filename.startsWith(path)) return false;
 				const len = path.length;
-				if (filename.length === len || (len > 0 && path[len-1] === pa.sep)) return true;
-				const sep = filename[len];
-				return sep === '/' || sep === pa.sep;
+				if (filename.length === len || (len > 0 && fsOpt.isSeparator(path[len-1]))) return true;
+				return fsOpt.isSeparator(filename[len]);
 			});
 		};
 	} else {
@@ -59429,13 +59527,18 @@ function resolverFromOptions(vm, options, override, compiler) {
 			}
 			const resolved = customResolver(x, path);
 			if (!resolved) return undefined;
-			if (externals) externals.push(new RegExp('^' + escapeRegExp(resolved)));
-			return resolver.loadAsFileOrDirecotry(resolved, extList);
+			if (typeof resolved === 'string') {
+				if (externals) externals.push(new RegExp('^' + escapeRegExp(resolved)));
+				return resolver.loadAsFileOrDirectory(resolved, extList);
+			}
+			const {module=x, path: resolvedPath} = resolved;
+			if (externals) externals.push(new RegExp('^' + escapeRegExp(resolvedPath)));
+			return resolver.loadNodeModules(module, [resolvedPath], extList);
 		};
 	}
 
 	if (typeof externalOpt !== 'object') {
-		return new DefaultResolver(builtins, checkPath, [], () => context, newCustomResolver, hostRequire, compiler, strict);
+		return new DefaultResolver(fsOpt, builtins, checkPath, [], () => context, newCustomResolver, hostRequire, compiler, strict);
 	}
 
 	let transitive = false;
@@ -59446,7 +59549,7 @@ function resolverFromOptions(vm, options, override, compiler) {
 		transitive = context === 'sandbox' && externalOpt.transitive;
 	}
 	externals = external.map(makeExternalMatcher);
-	return new LegacyResolver(builtins, checkPath, [], () => context, newCustomResolver, hostRequire, compiler, strict, externals, transitive);
+	return new LegacyResolver(fsOpt, builtins, checkPath, [], () => context, newCustomResolver, hostRequire, compiler, strict, externals, transitive);
 }
 
 exports.resolverFromOptions = resolverFromOptions;
@@ -59461,9 +59564,6 @@ exports.resolverFromOptions = resolverFromOptions;
 
 
 // The Resolver is currently experimental and might be exposed to users in the future.
-
-const pa = __nccwpck_require__(1017);
-const fs = __nccwpck_require__(7147);
 
 const {
 	VMError
@@ -59484,7 +59584,8 @@ function isArrayIndex(key) {
 
 class Resolver {
 
-	constructor(builtinModules, globalPaths, hostRequire) {
+	constructor(fs, builtinModules, globalPaths, hostRequire) {
+		this.fs = fs;
 		this.builtinModules = builtinModules;
 		this.globalPaths = globalPaths;
 		this.hostRequire = hostRequire;
@@ -59495,7 +59596,7 @@ class Resolver {
 	}
 
 	pathResolve(path) {
-		return pa.resolve(path);
+		return this.fs.resolve(path);
 	}
 
 	pathIsRelative(path) {
@@ -59503,23 +59604,23 @@ class Resolver {
 		if (path.length === 1) return true;
 		const idx = path[1] === '.' ? 2 : 1;
 		if (path.length <= idx) return false;
-		return path[idx] === '/' || path[idx] === pa.sep;
+		return this.fs.isSeparator(path[idx]);
 	}
 
 	pathIsAbsolute(path) {
-		return pa.isAbsolute(path);
+		return path !== '' && (this.fs.isSeparator(path[0]) || this.fs.isAbsolute(path));
 	}
 
 	pathConcat(...paths) {
-		return pa.join(...paths);
+		return this.fs.join(...paths);
 	}
 
 	pathBasename(path) {
-		return pa.basename(path);
+		return this.fs.basename(path);
 	}
 
 	pathDirname(path) {
-		return pa.dirname(path);
+		return this.fs.dirname(path);
 	}
 
 	lookupPaths(mod, id) {
@@ -59600,8 +59701,8 @@ class Resolver {
 
 class DefaultResolver extends Resolver {
 
-	constructor(builtinModules, checkPath, globalPaths, pathContext, customResolver, hostRequire, compiler, strict) {
-		super(builtinModules, globalPaths, hostRequire);
+	constructor(fs, builtinModules, checkPath, globalPaths, pathContext, customResolver, hostRequire, compiler, strict) {
+		super(fs, builtinModules, globalPaths, hostRequire);
 		this.checkPath = checkPath;
 		this.pathContext = pathContext;
 		this.customResolver = customResolver;
@@ -59617,7 +59718,7 @@ class DefaultResolver extends Resolver {
 
 	pathTestIsDirectory(path) {
 		try {
-			const stat = fs.statSync(path, {__proto__: null, throwIfNoEntry: false});
+			const stat = this.fs.statSync(path, {__proto__: null, throwIfNoEntry: false});
 			return stat && stat.isDirectory();
 		} catch (e) {
 			return false;
@@ -59626,7 +59727,7 @@ class DefaultResolver extends Resolver {
 
 	pathTestIsFile(path) {
 		try {
-			const stat = fs.statSync(path, {__proto__: null, throwIfNoEntry: false});
+			const stat = this.fs.statSync(path, {__proto__: null, throwIfNoEntry: false});
 			return stat && stat.isFile();
 		} catch (e) {
 			return false;
@@ -59634,7 +59735,7 @@ class DefaultResolver extends Resolver {
 	}
 
 	readFile(path) {
-		return fs.readFileSync(path, {encoding: 'utf8'});
+		return this.fs.readFileSync(path, {encoding: 'utf8'});
 	}
 
 	readFileWhenExists(path) {
@@ -59704,7 +59805,7 @@ class DefaultResolver extends Resolver {
 		// 2. If X begins with '/'
 		if (this.pathIsAbsolute(x)) {
 			// a. set Y to be the filesystem root
-			f = this.loadAsFileOrDirecotry(x, extList);
+			f = this.loadAsFileOrDirectory(x, extList);
 			if (f) return f;
 
 			// c. THROW "not found"
@@ -59718,13 +59819,13 @@ class DefaultResolver extends Resolver {
 					for (let i = 0; i < paths.length; i++) {
 						// a. LOAD_AS_FILE(Y + X)
 						// b. LOAD_AS_DIRECTORY(Y + X)
-						f = this.loadAsFileOrDirecotry(this.pathConcat(paths[i], x), extList);
+						f = this.loadAsFileOrDirectory(this.pathConcat(paths[i], x), extList);
 						if (f) return f;
 					}
 				} else if (paths === undefined) {
 					// a. LOAD_AS_FILE(Y + X)
 					// b. LOAD_AS_DIRECTORY(Y + X)
-					f = this.loadAsFileOrDirecotry(this.pathConcat(path, x), extList);
+					f = this.loadAsFileOrDirectory(this.pathConcat(path, x), extList);
 					if (f) return f;
 				} else {
 					throw new VMError('Invalid options.paths option.');
@@ -59732,7 +59833,7 @@ class DefaultResolver extends Resolver {
 			} else {
 				// a. LOAD_AS_FILE(Y + X)
 				// b. LOAD_AS_DIRECTORY(Y + X)
-				f = this.loadAsFileOrDirecotry(this.pathConcat(path, x), extList);
+				f = this.loadAsFileOrDirectory(this.pathConcat(path, x), extList);
 				if (f) return f;
 			}
 
@@ -59777,7 +59878,7 @@ class DefaultResolver extends Resolver {
 		return super.resolveFull(mod, x, options, ext, direct);
 	}
 
-	loadAsFileOrDirecotry(x, extList) {
+	loadAsFileOrDirectory(x, extList) {
 		// a. LOAD_AS_FILE(X)
 		const f = this.loadAsFile(x, extList);
 		if (f) return f;
@@ -60017,7 +60118,7 @@ class DefaultResolver extends Resolver {
 		} else {
 			// a. LOAD_AS_FILE(RESOLVED_PATH)
 			// b. LOAD_AS_DIRECTORY(RESOLVED_PATH)
-			f = this.loadAsFileOrDirecotry(resolvedPath, extList);
+			f = this.loadAsFileOrDirectory(resolvedPath, extList);
 		}
 		if (f) return f;
 		// 5. THROW "not found"
@@ -60849,6 +60950,7 @@ function transformer(args, body, isAsync, isGenerator, filename) {
 	const TO_RIGHT = 100;
 
 	let internStateValiable = undefined;
+	let tmpname = 'VM2_INTERNAL_TMPNAME';
 
 	acornWalkFull(ast, (node, state, type) => {
 		if (type === 'Function') {
@@ -60858,15 +60960,30 @@ function transformer(args, body, isAsync, isGenerator, filename) {
 		if (nodeType === 'CatchClause') {
 			const param = node.param;
 			if (param) {
-				const name = assertType(param, 'Identifier').name;
-				const cBody = assertType(node.body, 'BlockStatement');
-				if (cBody.body.length > 0) {
+				if (param.type === 'ObjectPattern') {
 					insertions.push({
 						__proto__: null,
-						pos: cBody.body[0].start,
-						order: TO_LEFT,
-						code: `${name}=${INTERNAL_STATE_NAME}.handleException(${name});`
+						pos: node.start,
+						order: TO_RIGHT,
+						coder: () => `catch(${tmpname}){try{throw(${tmpname}=${INTERNAL_STATE_NAME}.handleException(${tmpname}));}`
 					});
+					insertions.push({
+						__proto__: null,
+						pos: node.body.end,
+						order: TO_LEFT,
+						coder: () => `}`
+					});
+				} else {
+					const name = assertType(param, 'Identifier').name;
+					const cBody = assertType(node.body, 'BlockStatement');
+					if (cBody.body.length > 0) {
+						insertions.push({
+							__proto__: null,
+							pos: cBody.body[0].start,
+							order: TO_LEFT,
+							coder: () => `${name}=${INTERNAL_STATE_NAME}.handleException(${name});`
+						});
+					}
 				}
 			}
 		} else if (nodeType === 'WithStatement') {
@@ -60874,26 +60991,28 @@ function transformer(args, body, isAsync, isGenerator, filename) {
 				__proto__: null,
 				pos: node.object.start,
 				order: TO_LEFT,
-				code: INTERNAL_STATE_NAME + '.wrapWith('
+				coder: () => INTERNAL_STATE_NAME + '.wrapWith('
 			});
 			insertions.push({
 				__proto__: null,
 				pos: node.object.end,
 				order: TO_RIGHT,
-				code: ')'
+				coder: () => ')'
 			});
 		} else if (nodeType === 'Identifier') {
 			if (node.name === INTERNAL_STATE_NAME) {
 				if (internStateValiable === undefined || internStateValiable.start > node.start) {
 					internStateValiable = node;
 				}
+			} else if (node.name.startsWith(tmpname)) {
+				tmpname = node.name + '_UNIQUE';
 			}
 		} else if (nodeType === 'ImportExpression') {
 			insertions.push({
 				__proto__: null,
 				pos: node.start,
 				order: TO_RIGHT,
-				code: INTERNAL_STATE_NAME + '.'
+				coder: () => INTERNAL_STATE_NAME + '.'
 			});
 		}
 	});
@@ -60914,7 +61033,7 @@ function transformer(args, body, isAsync, isGenerator, filename) {
 	let curr = 0;
 	for (let i = 0; i < insertions.length; i++) {
 		const change = insertions[i];
-		ncode += code.substring(curr, change.pos) + change.code;
+		ncode += code.substring(curr, change.pos) + change.coder();
 		curr = change.pos;
 	}
 	ncode += code.substring(curr);
