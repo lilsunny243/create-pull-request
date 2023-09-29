@@ -19,7 +19,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v3
         with:
           node-version: 16.x
@@ -46,7 +46,7 @@ jobs:
       matrix:
         target: [built, committed]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           ref: main
       - if: matrix.target == 'built' || github.event_name == 'pull_request'
@@ -80,7 +80,7 @@ jobs:
           branch: ci-test-${{ matrix.target }}-${{ github.sha }}
 
       - name: Close Pull
-        uses: peter-evans/close-pull@v2
+        uses: peter-evans/close-pull@v3
         with:
           pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
           comment: '[CI] test ${{ matrix.target }}'
@@ -101,7 +101,7 @@ jobs:
 
       - if: steps.fc.outputs.comment-id == ''
         name: Create comment
-        uses: peter-evans/create-or-update-comment@v2
+        uses: peter-evans/create-or-update-comment@v3
         with:
           issue-number: ${{ github.event.number }}
           body: |
@@ -115,13 +115,13 @@ jobs:
     needs: [test]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v3
         with:
           name: dist
           path: dist
       - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v4
+        uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.ACTIONS_BOT_TOKEN }}
           commit-message: 'build: update distribution'

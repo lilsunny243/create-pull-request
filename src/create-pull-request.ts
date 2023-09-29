@@ -24,6 +24,7 @@ export interface Inputs {
   pushToFork: string
   title: string
   body: string
+  bodyPath: string
   labels: string[]
   assignees: string[]
   reviewers: string[]
@@ -38,6 +39,20 @@ export async function createPullRequest(inputs: Inputs): Promise<void> {
     if (!inputs.token) {
       throw new Error(`Input 'token' not supplied. Unable to continue.`)
     }
+    if (inputs.bodyPath) {
+      if (!utils.fileExistsSync(inputs.bodyPath)) {
+        throw new Error(`File '${inputs.bodyPath}' does not exist.`)
+      }
+      // Update the body input with the contents of the file
+      inputs.body = utils.readFile(inputs.bodyPath)
+    }
+    // 65536 characters is the maximum allowed for the pull request body.
+    if (inputs.body.length > 65536) {
+      core.warning(
+        `Pull request body is too long. Truncating to 65536 characters.`
+      )
+      inputs.body = inputs.body.substring(0, 65536)
+    }
 
     // Get the repository path
     const repoPath = utils.getRepoPath(inputs.path)
@@ -45,8 +60,9 @@ export async function createPullRequest(inputs: Inputs): Promise<void> {
     const git = await GitCommandManager.create(repoPath)
 
     // Save and unset the extraheader auth config if it exists
-    core.startGroup('Save persisted git credentials')
+    core.startGroup('Prepare git configuration')
     gitAuthHelper = new GitAuthHelper(git)
+    await gitAuthHelper.addSafeDirectory()
     await gitAuthHelper.savePersistedAuth()
     core.endGroup()
 
@@ -67,9 +83,8 @@ export async function createPullRequest(inputs: Inputs): Promise<void> {
       core.info(
         `Checking if '${branchRepository}' is a fork of '${baseRemote.repository}'`
       )
-      const parentRepository = await githubHelper.getRepositoryParent(
-        branchRepository
-      )
+      const parentRepository =
+        await githubHelper.getRepositoryParent(branchRepository)
       if (parentRepository != baseRemote.repository) {
         throw new Error(
           `Repository '${branchRepository}' is not a fork of '${baseRemote.repository}'. Unable to continue.`
@@ -195,7 +210,7 @@ export async function createPullRequest(inputs: Inputs): Promise<void> {
       await git.push([
         '--force-with-lease',
         branchRemoteName,
-        `HEAD:refs/heads/${inputs.branch}`
+        `${inputs.branch}:refs/heads/${inputs.branch}`
       ])
       core.endGroup()
     }
@@ -252,9 +267,10 @@ export async function createPullRequest(inputs: Inputs): Promise<void> {
     core.setFailed(utils.getErrorMessage(error))
   } finally {
     // Remove auth and restore persisted auth config if it existed
-    core.startGroup('Restore persisted git credentials')
+    core.startGroup('Restore git configuration')
     await gitAuthHelper.removeAuth()
     await gitAuthHelper.restorePersistedAuth()
+    await gitAuthHelper.removeSafeDirectory()
     core.endGroup()
   }
 }
